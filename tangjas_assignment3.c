@@ -1,8 +1,7 @@
 // Program Name: tangjas_assignment3.c
 // Author: Jason Tang
-// Program creates CLI-based UI to print movies depending on option selected:
-// 1 for movies released in specified year, 2 for highest rated movie each year
-// 3 for movies in a specific lanugage, 4 to exit
+// Program creates small shell with specific requirements for built-in and
+// other commands
 
 // Code adapted from 
 // Title: SMALLSH
@@ -16,13 +15,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/wait.h>
+#include <signal.h>
 
 #define INPUT_LENGTH 2048
 #define MAX_ARGS 512
 
+int status = 0;
 
-struct command_line
-{
+
+struct command_line {
 	char *argv[MAX_ARGS + 1];
 	int argc;
 	char *input_file;
@@ -31,8 +33,7 @@ struct command_line
 };
 
 
-struct command_line *parse_input()
-{
+struct command_line *parse_input() {
 	char input[INPUT_LENGTH];
 	struct command_line *curr_command = (struct command_line *) calloc(1, sizeof(struct command_line));
 
@@ -59,49 +60,60 @@ struct command_line *parse_input()
 }
 
 
-// Adapted from following Explorations:
+// Code adapted from following Explorations:
 // Process API - Monitoring Child Processes
 // Process API - Executing a New Program
 void execute_command(struct command_line *command) {
-    execvp(command->argv[0], command->argv);
-
-    // execvp returns only on error 
-    perror("execvp");   
-    exit(EXIT_FAILURE);
-
-    pid_t spawnpid = -5;
-    int intVal = 10;
-    // If fork is successful, the value of spawnpid will be 0 in the child
+    // if fork is successful, the value of spawnpid will be 0 in the child
     // and will be the child's pid in the parent
-    spawnpid = fork();
-    switch (spawnpid){
+    pid_t spawnpid = fork();
+    switch (spawnpid) {
         case -1:
+			// fork() failed
             perror("fork() failed!");
-            exit(1);
+            exit(EXIT_FAILURE);
             break;
         case 0:
-            // spawnpid is 0 in the child
-            intVal = intVal + 1;
-            printf("I am the child! intVal = %d\n", intVal);
-            break;
+            // child process, replace with new command
+            execvp(command->argv[0], command->argv);
+			perror("execvp");   
+			exit(EXIT_FAILURE);
+			break;
         default:
-            // spawnpid is the pid of the child
-            intVal = intVal - 1;
-            printf("I am the parent! intVal = %d\n", intVal);
+            // parent process, foreground
+			int child_status;
+			waitpid(spawnpid, &child_status, 0);
+			if (WIFEXITED(status)) {
+				status = WEXITSTATUS(child_status);
+			} else {
+				status = WTERMSIG(child_status);
+				printf("terminated by signal %d\n", status);
+    			fflush(stdout);
+			}
             break;
     }
 }
 
 
-int main()
-{
+int main() {
 	struct command_line *curr_command;
 
 	while(true)
 	{
 		curr_command = parse_input();
-
-        execute_command(curr_command);
+		
+		// commands for 'exit', 'cd', 'status'
+        if (strcmp(curr_command->argv[0], "exit") == 0) {
+			exit(0);
+		} else if (strcmp(curr_command->argv[0], "cd") == 0) {
+			chdir(curr_command->argv[1]);
+			continue;
+		} else if (strcmp(curr_command->argv[0], "status") == 0) {
+			printf("exit value %d\n", status);
+			continue;
+		} else {
+			execute_command(curr_command);
+		}
 	}
 	return EXIT_SUCCESS;
 }
