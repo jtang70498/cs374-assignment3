@@ -3,11 +3,9 @@
 // Program creates small shell with specific requirements for built-in and
 // other commands
 
-// Code adapted from 
-// Title: SMALLSH
-// Date: 7/26/25
 // Adapted from URL: https://canvas.oregonstate.edu/courses/2007910/files/112284925
 // sample_parser.c
+// Adapted from Module 6 and 7 Explorations
 // Author: CS 374 Instructors
 
 #include <stdio.h>
@@ -22,7 +20,10 @@
 #define MAX_ARGS 512
 
 int status = 0;
+int foreground_only_mode = 0;
 
+void handle_sigint(int signo);
+void handle_sigtstp(int signo);
 
 struct command_line {
 	char *argv[MAX_ARGS + 1];
@@ -60,9 +61,6 @@ struct command_line *parse_input() {
 }
 
 
-// Code adapted from following Explorations:
-// Process API - Monitoring Child Processes
-// Process API - Executing a New Program
 void execute_command(struct command_line *command) {
     // if fork is successful, the value of spawnpid will be 0 in the child
     // and will be the child's pid in the parent
@@ -73,15 +71,54 @@ void execute_command(struct command_line *command) {
             perror("fork() failed!");
             exit(EXIT_FAILURE);
             break;
+
         case 0:
-            // child process, replace with new command
-            execvp(command->argv[0], command->argv);
-			perror("execvp");   
+            // child process
+
+			// fill out int_action struct
+			struct sigaction int_action = {0};
+			int_action.sa_handler = SIG_IGN;
+			sigaction(SIGINT, &int_action, NULL);
+
+			// fill out dfl_action struct
+			struct sigaction dfl_action = {0};
+			dfl_action.sa_handler = SIG_DFL;
+			sigaction(SIGINT, &dfl_action, NULL);
+
+			// fill out tstp_action struct
+			struct sigaction tstp_action = {0};
+			tstp_action.sa_handler = handle_sigtstp;
+			sigfillset(&tstp_action.sa_mask);
+			tstp_action.sa_flags = SA_RESTART;
+			sigaction(SIGTSTP, &tstp_action, NULL);
+
+			if (command->is_bg && foreground_only_mode == 0) {
+				sigaction(SIGINT, &int_action, NULL);
+				sigaction(SIGTSTP, &tstp_action, NULL);
+			} else {
+				sigaction(SIGINT, &dfl_action, NULL);
+				sigaction(SIGTSTP, &tstp_action, NULL);
+			}
+
+			// TODO: handle input/output
+
+			// execute process
+			execvp(command->argv[0], command->argv);
+
+			// fork() failed
+			perror("execvp");
 			exit(EXIT_FAILURE);
 			break;
+
         default:
-            // parent process, foreground
+            // parent process
 			int child_status;
+
+			// if (command->is_bg && foreground_only_mode == 0) {
+			// 	getppid()
+			// } else {
+
+			// }
 			waitpid(spawnpid, &child_status, 0);
 			if (WIFEXITED(status)) {
 				status = WEXITSTATUS(child_status);
@@ -91,6 +128,27 @@ void execute_command(struct command_line *command) {
     			fflush(stdout);
 			}
             break;
+    }
+}
+
+
+void handle_sigint(int signo) {
+	char* message = "Caught SIGINT, sleeping for 10 seconds\n";
+	// We are using write rather than printf
+	write(STDOUT_FILENO, message, 39);
+	sleep(10);
+}
+
+
+void handle_sigtstp(int signo) {
+    if (foreground_only_mode == 0) {
+        char* msg = "\nEntering foreground-only mode (& is now ignored)\n: ";
+        write(STDOUT_FILENO, msg, strlen(msg));
+        foreground_only_mode = 1;
+    } else {
+        char* msg = "\nExiting foreground-only mode\n: ";
+        write(STDOUT_FILENO, msg, strlen(msg));
+        foreground_only_mode = 0;
     }
 }
 
