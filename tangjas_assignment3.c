@@ -77,17 +77,10 @@ void execute_command(struct command_line *command) {
         case 0:
 			// fill out sigint_action struct
 			struct sigaction sigint_action = {0};
-			sigint_action.sa_handler = SIG_IGN;
+			sigint_action.sa_handler = SIG_DFL;
 			sigfillset(&sigint_action.sa_mask);
 			sigint_action.sa_flags = 0;
 			sigaction(SIGINT, &sigint_action, NULL);
-
-			// fill out sigdfl_action struct
-			// struct sigaction sigdfl_action = {0};
-			// sigdfl_action.sa_handler = SIG_DFL;
-			// sigfillset(&sigdfl_action.sa_mask);
-			// sigdfl_action.sa_flags = 0;
-			// sigaction(SIGINT, &sigdfl_action, NULL);
 
 			// fill out sigtstp_action struct
 			struct sigaction sigtstp_action = {0};
@@ -99,46 +92,37 @@ void execute_command(struct command_line *command) {
 			if (command->is_bg && foreground_only_mode == 0) {
 				sigaction(SIGINT, &sigint_action, NULL);
 				sigaction(SIGTSTP, &sigint_action, NULL);
-			// } else {
-			// 	sigaction(SIGINT, &sigdfl_action, NULL);
-			// 	sigaction(SIGTSTP, &sigint_action, NULL);
 			}
 
 			if (command->input_file != NULL) {
 				// Open the source file
 				int source_fd = open(command->input_file, O_RDONLY);
-				if (source_fd == -1) { 
-					perror("cannot open input file"); 
+				if (source_fd == -1) {
+					printf("cannot open %s for input\n", command->input_file);
 					exit(1); 
 				}
 				// Redirect stdin to source file
-				int result = dup2(source_fd, 0);
-				if (result == -1) { 
-					perror("source dup2()"); 
-					exit(2); 
-				}
+				dup2(source_fd, 0);
+				exit(2);
 			}
 
 			if (command->input_file != NULL) {
 				// Open target file
 				int target_fd = open(command->output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-				if (target_fd == -1) { 
-					perror("cannot open output file");
-					exit(1); 
+				if (target_fd == -1) {
+					printf("cannot open %s for output\n", command->output_file);
+					exit(1);
 				}
 				// Redirect stdout to target file
-				int result = dup2(target_fd, 1);
-				if (result == -1) { 
-					perror("target dup2()"); 
-					exit(2); 
-				}
+				dup2(target_fd, 1);
+				exit(2);
 			}
 
 			// execute process
 			execvp(command->argv[0], command->argv);
 
 			// fork() failed
-			perror("execvp");
+			printf("%s: no such file or directory\n", command->argv[0]);
 			exit(EXIT_FAILURE);
 			break;
 
@@ -152,7 +136,7 @@ void execute_command(struct command_line *command) {
 
 			// }
 			waitpid(spawnpid, &child_status, 0);
-			if (WIFEXITED(status)) {
+			if (WIFEXITED(child_status)) {
 				status = WEXITSTATUS(child_status);
 			} else {
 				status = WTERMSIG(child_status);
@@ -166,12 +150,12 @@ void execute_command(struct command_line *command) {
 
 void handle_sigtstp(int signo) {
     if (foreground_only_mode == 0) {
-        char* msg = "\nEntering foreground-only mode (& is now ignored)\n: ";
-        write(STDOUT_FILENO, msg, strlen(msg));
+        char* message = "\nEntering foreground-only mode (& is now ignored)\n: ";
+        write(STDOUT_FILENO, message, 53);
         foreground_only_mode = 1;
     } else {
-        char* msg = "\nExiting foreground-only mode\n: ";
-        write(STDOUT_FILENO, msg, strlen(msg));
+        char* message = "\nExiting foreground-only mode\n: ";
+        write(STDOUT_FILENO, message, 33);
         foreground_only_mode = 0;
     }
 }
@@ -180,12 +164,14 @@ void handle_sigtstp(int signo) {
 int main() {
 	struct command_line *curr_command;
 
+	// fill out sigint_action struct
 	struct sigaction sigint_action = {0};
 	sigint_action.sa_handler = SIG_IGN;
 	sigfillset(&sigint_action.sa_mask);
 	sigint_action.sa_flags = 0;
 	sigaction(SIGINT, &sigint_action, NULL);
 
+	// fill out sigtstp_action struct
 	struct sigaction sigtstp_action = {0};
 	sigtstp_action.sa_handler = handle_sigtstp;
 	sigfillset(&sigtstp_action.sa_mask);
