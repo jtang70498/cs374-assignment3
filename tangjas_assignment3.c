@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <fcntl.h>
 
 #define INPUT_LENGTH 2048
 #define MAX_ARGS 512
@@ -22,7 +23,6 @@
 int status = 0;
 int foreground_only_mode = 0;
 
-void handle_sigint(int signo);
 void handle_sigtstp(int signo);
 
 struct command_line {
@@ -66,41 +66,73 @@ void execute_command(struct command_line *command) {
     // and will be the child's pid in the parent
     pid_t spawnpid = fork();
     switch (spawnpid) {
+		// error case
         case -1:
 			// fork() failed
             perror("fork() failed!");
             exit(EXIT_FAILURE);
             break;
 
+		// child process
         case 0:
-            // child process
+			// fill out sigint_action struct
+			struct sigaction sigint_action = {0};
+			sigint_action.sa_handler = SIG_IGN;
+			sigfillset(&sigint_action.sa_mask);
+			sigint_action.sa_flags = 0;
+			sigaction(SIGINT, &sigint_action, NULL);
 
-			// fill out int_action struct
-			struct sigaction int_action = {0};
-			int_action.sa_handler = SIG_IGN;
-			sigaction(SIGINT, &int_action, NULL);
+			// fill out sigdfl_action struct
+			// struct sigaction sigdfl_action = {0};
+			// sigdfl_action.sa_handler = SIG_DFL;
+			// sigfillset(&sigdfl_action.sa_mask);
+			// sigdfl_action.sa_flags = 0;
+			// sigaction(SIGINT, &sigdfl_action, NULL);
 
-			// fill out dfl_action struct
-			struct sigaction dfl_action = {0};
-			dfl_action.sa_handler = SIG_DFL;
-			sigaction(SIGINT, &dfl_action, NULL);
-
-			// fill out tstp_action struct
-			struct sigaction tstp_action = {0};
-			tstp_action.sa_handler = handle_sigtstp;
-			sigfillset(&tstp_action.sa_mask);
-			tstp_action.sa_flags = SA_RESTART;
-			sigaction(SIGTSTP, &tstp_action, NULL);
+			// fill out sigtstp_action struct
+			struct sigaction sigtstp_action = {0};
+			sigtstp_action.sa_handler = handle_sigtstp;
+			sigfillset(&sigtstp_action.sa_mask);
+			sigtstp_action.sa_flags = SA_RESTART;
+			sigaction(SIGTSTP, &sigtstp_action, NULL);
 
 			if (command->is_bg && foreground_only_mode == 0) {
-				sigaction(SIGINT, &int_action, NULL);
-				sigaction(SIGTSTP, &tstp_action, NULL);
-			} else {
-				sigaction(SIGINT, &dfl_action, NULL);
-				sigaction(SIGTSTP, &tstp_action, NULL);
+				sigaction(SIGINT, &sigint_action, NULL);
+				sigaction(SIGTSTP, &sigint_action, NULL);
+			// } else {
+			// 	sigaction(SIGINT, &sigdfl_action, NULL);
+			// 	sigaction(SIGTSTP, &sigint_action, NULL);
 			}
 
-			// TODO: handle input/output
+			if (command->input_file != NULL) {
+				// Open the source file
+				int source_fd = open(command->input_file, O_RDONLY);
+				if (source_fd == -1) { 
+					perror("cannot open input file"); 
+					exit(1); 
+				}
+				// Redirect stdin to source file
+				int result = dup2(source_fd, 0);
+				if (result == -1) { 
+					perror("source dup2()"); 
+					exit(2); 
+				}
+			}
+
+			if (command->input_file != NULL) {
+				// Open target file
+				int target_fd = open(command->output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+				if (target_fd == -1) { 
+					perror("cannot open output file");
+					exit(1); 
+				}
+				// Redirect stdout to target file
+				int result = dup2(target_fd, 1);
+				if (result == -1) { 
+					perror("target dup2()"); 
+					exit(2); 
+				}
+			}
 
 			// execute process
 			execvp(command->argv[0], command->argv);
@@ -110,8 +142,8 @@ void execute_command(struct command_line *command) {
 			exit(EXIT_FAILURE);
 			break;
 
+		// parent process
         default:
-            // parent process
 			int child_status;
 
 			// if (command->is_bg && foreground_only_mode == 0) {
@@ -132,14 +164,6 @@ void execute_command(struct command_line *command) {
 }
 
 
-void handle_sigint(int signo) {
-	char* message = "Caught SIGINT, sleeping for 10 seconds\n";
-	// We are using write rather than printf
-	write(STDOUT_FILENO, message, 39);
-	sleep(10);
-}
-
-
 void handle_sigtstp(int signo) {
     if (foreground_only_mode == 0) {
         char* msg = "\nEntering foreground-only mode (& is now ignored)\n: ";
@@ -155,6 +179,18 @@ void handle_sigtstp(int signo) {
 
 int main() {
 	struct command_line *curr_command;
+
+	struct sigaction sigint_action = {0};
+	sigint_action.sa_handler = SIG_IGN;
+	sigfillset(&sigint_action.sa_mask);
+	sigint_action.sa_flags = 0;
+	sigaction(SIGINT, &sigint_action, NULL);
+
+	struct sigaction sigtstp_action = {0};
+	sigtstp_action.sa_handler = handle_sigtstp;
+	sigfillset(&sigtstp_action.sa_mask);
+	sigtstp_action.sa_flags = SA_RESTART;
+	sigaction(SIGTSTP, &sigtstp_action, NULL);
 
 	while(true)
 	{
