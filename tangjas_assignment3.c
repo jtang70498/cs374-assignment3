@@ -62,10 +62,11 @@ struct command_line *parse_input() {
 
 
 void execute_command(struct command_line *command) {
-    // if fork is successful, the value of spawnpid will be 0 in the child
-    // and will be the child's pid in the parent
+    // forking processs
     pid_t spawnpid = fork();
+
     switch (spawnpid) {
+
 		// error case
         case -1:
 			// fork() failed
@@ -93,31 +94,45 @@ void execute_command(struct command_line *command) {
 				sigaction(SIGINT, &sigint_action, NULL);
 				sigaction(SIGTSTP, &sigint_action, NULL);
 			}
-
+			
+			// for input redirection
 			if (command->input_file != NULL) {
-				// Open the source file
+				// open source file
 				int source_fd = open(command->input_file, O_RDONLY);
 				if (source_fd == -1) {
 					printf("cannot open %s for input\n", command->input_file);
 					fflush(stdout);
 					exit(1); 
 				}
-				// Redirect stdin to source file
+				// redirect stdin to source file
 				dup2(source_fd, 0);
-				close(source_fd);
 			}
-
+			
+			// for output redirection
 			if (command->output_file != NULL) {
-				// Open target file
+				// open target file
 				int target_fd = open(command->output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 				if (target_fd == -1) {
 					printf("cannot open %s for output\n", command->output_file);
 					fflush(stdout);
 					exit(1);
 				}
-				// Redirect stdout to target file
+				// redirect stdout to target file
 				dup2(target_fd, 1);
-				close(target_fd);
+			}
+
+			// for /dev/null redirection
+			if (command->is_bg && foreground_only_mode == 0) {
+				if (command->input_file == NULL) {
+					// redirect stdin to /dev/null
+					int null_fd = open("/dev/null", O_RDONLY);
+					dup2(null_fd, 0);
+				}
+				if (command->output_file == NULL) {
+					// redirect stdout to /dev/null
+					int null_fd = open("/dev/null", O_WRONLY);
+					dup2(null_fd, 1);
+				}
 			}
 
 			// execute process
@@ -131,19 +146,21 @@ void execute_command(struct command_line *command) {
 		// parent process
         default:
 			int child_status;
-
-			// if (command->is_bg && foreground_only_mode == 0) {
-			// 	getppid()
-			// } else {
-
-			// }
-			waitpid(spawnpid, &child_status, 0);
-			if (WIFEXITED(child_status)) {
-				status = WEXITSTATUS(child_status);
+			
+			// background command
+			if (command->is_bg && foreground_only_mode == 0) {
+				printf("background pid is %d\n", spawnpid);
+				fflush(stdout);
+			// foreground command
 			} else {
-				status = WTERMSIG(child_status);
-				printf("terminated by signal %d\n", status);
-    			fflush(stdout);
+				waitpid(spawnpid, &child_status, 0);
+				if (WIFEXITED(child_status)) {
+					status = WEXITSTATUS(child_status);
+				} else {
+					status = WTERMSIG(child_status);
+					printf("terminated by signal %d\n", status);
+					fflush(stdout);
+				}
 			}
             break;
     }
@@ -164,6 +181,7 @@ void handle_sigtstp(int signo) {
 
 
 int main() {
+	int child_status;
 	struct command_line *curr_command;
 
 	// fill out sigint_action struct
@@ -180,8 +198,24 @@ int main() {
 	sigtstp_action.sa_flags = SA_RESTART;
 	sigaction(SIGTSTP, &sigtstp_action, NULL);
 
-	while(true)
-	{
+	while(true) {
+		pid_t background_pid = waitpid(-1, &child_status, WNOHANG);
+		if (background_pid > 0) {
+			if (WIFEXITED(child_status)) {
+				// print background process exit info
+				printf("background pid %d is done: exit value %d\n", background_pid, WEXITSTATUS(child_status));
+				fflush(stdout);
+			} else if (WIFSIGNALED(child_status)) {
+				// print background process termination by signal
+				printf("background pid %d is done: terminated by signal %d\n", background_pid, WTERMSIG(child_status));
+				fflush(stdout);
+			}
+		} else {
+			break;
+		}
+	}
+
+	while(true) {
 		curr_command = parse_input();
 		
 		// commands for 'exit', 'cd', 'status'
