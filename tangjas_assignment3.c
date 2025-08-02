@@ -99,23 +99,25 @@ void execute_command(struct command_line *command) {
 				int source_fd = open(command->input_file, O_RDONLY);
 				if (source_fd == -1) {
 					printf("cannot open %s for input\n", command->input_file);
+					fflush(stdout);
 					exit(1); 
 				}
 				// Redirect stdin to source file
 				dup2(source_fd, 0);
-				exit(2);
+				close(source_fd);
 			}
 
-			if (command->input_file != NULL) {
+			if (command->output_file != NULL) {
 				// Open target file
 				int target_fd = open(command->output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 				if (target_fd == -1) {
 					printf("cannot open %s for output\n", command->output_file);
+					fflush(stdout);
 					exit(1);
 				}
 				// Redirect stdout to target file
 				dup2(target_fd, 1);
-				exit(2);
+				close(target_fd);
 			}
 
 			// execute process
